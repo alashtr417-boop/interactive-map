@@ -1,41 +1,49 @@
-interactive-map/      <-- اسم مجلد المشروع
-│
-├── index.html        <-- ملف الخريطة الرئيسي
-└── data/             <-- مجلد جديد
-    └── yourdata.geojson  <-- ملف البيانات
-  {
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>خريطتي التفاعلية</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; }
+    </style>
+</head>
+<body>
 
-  }  
-  {
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "موقع تجريبي 1",
-        "description": "هذه نقطة اختبار في بغداد تظهر من ملف GeoJSON."
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          44.3661,
-          33.3152
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "name": "جامعة بغداد",
-        "description": "موقع جامعة بغداد - الجادرية"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          44.3780,
-          33.2700
-        ]
-      }
-    }
-  ]
-}
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // إحداثيات بغداد
+        var map = L.map('map').setView([33.3152, 44.3661], 10);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // تحميل ملف البيانات
+        fetch('data/test11.geojson')
+            .then(response => {
+                if (!response.ok) { throw new Error("لم يتم العثور على الملف"); }
+                return response.json();
+            })
+            .then(data => {
+                L.geoJSON(data, {
+                    onEachFeature: function (feature, layer) {
+                        if (feature.properties) {
+                            let popupContent = "<b>تفاصيل:</b><br>";
+                            for (let key in feature.properties) {
+                                popupContent += `${key}: ${feature.properties[key]}<br>`;
+                            }
+                            layer.bindPopup(popupContent);
+                        }
+                    }
+                }).addTo(map);
+            })
+            .catch(error => console.log("جاري البحث عن البيانات... تأكد من مسار الملف"));
+    </script>
+</body>
+</html>
