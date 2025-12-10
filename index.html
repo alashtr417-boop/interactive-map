@@ -1,0 +1,41 @@
+interactive-map/      <-- اسم مجلد المشروع
+│
+├── index.html        <-- ملف الخريطة الرئيسي
+└── data/             <-- مجلد جديد
+    └── yourdata.geojson  <-- ملف البيانات
+  {
+
+  }  
+  {
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "موقع تجريبي 1",
+        "description": "هذه نقطة اختبار في بغداد تظهر من ملف GeoJSON."
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          44.3661,
+          33.3152
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "جامعة بغداد",
+        "description": "موقع جامعة بغداد - الجادرية"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          44.3780,
+          33.2700
+        ]
+      }
+    }
+  ]
+}
