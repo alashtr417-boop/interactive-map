@@ -2,47 +2,70 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>خريطة تفاعلية - قارئ Shapefile المصحح</title>
+<title>نظام إدارة الطبقات الجغرافية</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
 <style>
-body { margin:0; font-family: "Segoe UI", Arial; }
+body { margin:0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; }
 #map { height:100vh; width:100%; }
 
+/* --- تصميم مربع الرفع (يسار) --- */
 #uploadBox {
-  position: absolute;
-  top: 15px;
-  left: 15px;
-  z-index: 9999;
-  background: white;
-  padding: 10px 14px;
-  border-radius: 10px;
-  box-shadow: 0 0 8px #0003;
-  font-size: 14px;
+  position: absolute; top: 15px; left: 15px; z-index: 1000;
+  background: white; padding: 12px; border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-size: 14px;
+  border-right: 4px solid #007bff;
 }
-#uploadBox label {
-  font-weight: bold;
-  color: #0066cc;
-  cursor: pointer;
+#uploadBox label { font-weight: bold; color: #007bff; cursor: pointer; display: flex; align-items: center; gap: 8px;}
+#uploadBox label:hover { color: #0056b3; }
+#status { font-size: 11px; color: #666; margin-top: 5px; display: none; }
+
+/* --- تصميم قائمة إدارة الطبقات (يمين) --- */
+#layerControl {
+  position: absolute; top: 15px; right: 15px; z-index: 1000;
+  background: white; width: 220px; max-height: 80vh;
+  border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  display: flex; flex-direction: column; overflow: hidden;
 }
-#uploadBox label:hover {
-  text-decoration: underline;
+#layerHeader {
+  background: #f8f9fa; padding: 10px; border-bottom: 1px solid #ddd;
+  font-weight: bold; font-size: 14px; color: #333;
 }
-#status {
-    font-size: 12px;
-    color: #666;
-    margin-top: 5px;
-    display: none;
+#layerList {
+  list-style: none; padding: 0; margin: 0; overflow-y: auto;
 }
+.layer-item {
+  padding: 8px 10px; border-bottom: 1px solid #eee;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; transition: background 0.2s;
+}
+.layer-item:hover { background: #f1f1f1; }
+.layer-name { display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.btn-remove {
+  background: none; border: none; color: #dc3545; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+}
+.btn-remove:hover { background: #fee2e2; }
+.color-box { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid #ccc; }
 </style>
 </head>
 <body>
 
 <div id="uploadBox">
-  <label>📁 رفع ملف (Shapefile يجب رفع .shp و .dbf معاً)
+  <label>
+    <i class="fa-solid fa-cloud-upload-alt"></i>
+    <span>رفع طبقة جديدة (SHP+DBF / GeoJSON)</span>
     <input type="file" id="fileInput" multiple style="display:none">
   </label>
   <div id="status">جاري المعالجة...</div>
+</div>
+
+<div id="layerControl">
+  <div id="layerHeader"><i class="fa-solid fa-layer-group"></i> الطبقات المضافة</div>
+  <ul id="layerList">
+    <li style="padding:15px; text-align:center; color:#999; font-size:12px;" id="emptyMsg">لا توجد طبقات حالياً</li>
+  </ul>
 </div>
 
 <div id="map"></div>
@@ -55,23 +78,37 @@ body { margin:0; font-family: "Segoe UI", Arial; }
 var googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: "Google Satellite" });
 var map = L.map('map', { center: [33.3152,44.3661], zoom: 6, layers: [googleSat] });
 
-var currentLayer = null;
+// مصفوفة لتخزين الطبقات للتحكم بها
+var allLayers = {}; 
 
-// 2️⃣ دالة رسم GeoJSON
-function addGeoJSON(data) {
-    if(currentLayer) map.removeLayer(currentLayer);
+// دالة لتوليد ألوان عشوائية للطبقات
+function getRandomColor() {
+    var letters = '0123456789ABCDEF';
+    var color = '#';
+    for (var i = 0; i < 6; i++) { color += letters[Math.floor(Math.random() * 16)]; }
+    return color;
+}
 
-    currentLayer = L.geoJSON(data, {
+// 2️⃣ دالة إضافة الطبقة إلى الخريطة والقائمة
+function addLayerToMap(data, fileName) {
+    // إخفاء رسالة "لا توجد طبقات"
+    document.getElementById("emptyMsg").style.display = "none";
+
+    let layerColor = getRandomColor();
+    let layerId = Date.now(); // رقم مميز للطبقة
+
+    // إنشاء طبقة GeoJSON
+    let newLayer = L.geoJSON(data, {
         style: function(feature) {
             return {
-                color: feature.properties.color || "#ff5500",
-                fillColor: feature.properties.fill || "#ff5500",
+                color: layerColor,
+                fillColor: layerColor,
                 weight: 2,
                 fillOpacity: 0.4
             }
         },
         onEachFeature: function(feature, layer) {
-            let popup = "<div style='text-align:right; max-height:200px; overflow-y:auto'><h4>تفاصيل</h4><table border='1' style='width:100%; border-collapse:collapse'>";
+            let popup = "<div style='text-align:right; max-height:200px; overflow-y:auto'><h4>البيانات الوصفية</h4><table border='1' style='width:100%; border-collapse:collapse'>";
             for (let key in feature.properties) {
                 popup += `<tr><td style='padding:4px; background:#f0f0f0'><b>${key}</b></td><td style='padding:4px'>${feature.properties[key]}</td></tr>`;
             }
@@ -80,14 +117,58 @@ function addGeoJSON(data) {
         }
     }).addTo(map);
 
-    try {
-        map.fitBounds(currentLayer.getBounds());
-    } catch(e) { console.log("لا توجد حدود للطبقة"); }
+    // توجيه الكاميرا للطبقة الجديدة
+    try { map.fitBounds(newLayer.getBounds()); } catch(e){}
+
+    // تخزين الطبقة في الذاكرة
+    allLayers[layerId] = newLayer;
+
+    // --- إضافة الطبقة إلى قائمة التحكم (HTML) ---
+    let list = document.getElementById("layerList");
+    let li = document.createElement("li");
+    li.className = "layer-item";
+    li.id = "li-" + layerId;
     
+    li.innerHTML = `
+        <div class="layer-name">
+            <input type="checkbox" checked onchange="toggleLayer(${layerId}, this.checked)">
+            <span class="color-box" style="background:${layerColor}"></span>
+            <span title="${fileName}">${fileName}</span>
+        </div>
+        <button class="btn-remove" onclick="removeLayer(${layerId})" title="حذف الطبقة">
+            <i class="fa-solid fa-trash"></i>
+        </button>
+    `;
+    list.appendChild(li);
+
+    // إخفاء رسالة التحميل
     document.getElementById("status").style.display = "none";
 }
 
-// 3️⃣ دالة مساعدة لتحويل الملف إلى ArrayBuffer (ضروري لملفات Shapefile)
+// دالة إخفاء/إظهار الطبقة
+window.toggleLayer = function(id, isVisible) {
+    if (isVisible) {
+        map.addLayer(allLayers[id]);
+    } else {
+        map.removeLayer(allLayers[id]);
+    }
+}
+
+// دالة حذف الطبقة نهائياً
+window.removeLayer = function(id) {
+    if(confirm("هل أنت متأكد من حذف هذه الطبقة؟")) {
+        map.removeLayer(allLayers[id]); // حذف من الخريطة
+        delete allLayers[id]; // حذف من الذاكرة
+        document.getElementById("li-" + id).remove(); // حذف من القائمة
+        
+        // إذا فرغت القائمة، أعد رسالة "لا توجد طبقات"
+        if(Object.keys(allLayers).length === 0) {
+            document.getElementById("emptyMsg").style.display = "block";
+        }
+    }
+}
+
+// 3️⃣ دالة مساعدة لملفات Shapefile
 function readFileAsArrayBuffer(file) {
     return new Promise((resolve, reject) => {
         let reader = new FileReader();
@@ -104,62 +185,45 @@ document.getElementById("fileInput").addEventListener("change", async function(e
     statusDiv.style.display = "block";
     statusDiv.innerText = "جاري قراءة الملفات...";
 
-    // تصنيف الملفات
     let shpFile = Array.from(files).find(f => f.name.toLowerCase().endsWith(".shp"));
     let dbfFile = Array.from(files).find(f => f.name.toLowerCase().endsWith(".dbf"));
     let geojsonFile = Array.from(files).find(f => f.name.toLowerCase().endsWith(".geojson") || f.name.toLowerCase().endsWith(".json"));
 
     try {
-        // ✅ الحالة الأولى: Shapefile (SHP + DBF)
         if(shpFile) {
             statusDiv.innerText = "جاري تحويل Shapefile...";
-            
-            // قراءة الملفات كـ ArrayBuffer
             const shpBuffer = await readFileAsArrayBuffer(shpFile);
             const dbfBuffer = dbfFile ? await readFileAsArrayBuffer(dbfFile) : undefined;
 
-            // فتح الملف باستخدام المكتبة
             const source = await shapefile.open(shpBuffer, dbfBuffer);
-            
-            // تجميع كل العناصر (Loop) - هذا هو الجزء الذي كان ينقصك
             let features = [];
             let result;
             while (!(result = await source.read()).done) {
                 features.push(result.value);
             }
 
-            // تكوين كائن GeoJSON كامل
-            const geojson = {
-                type: "FeatureCollection",
-                features: features
-            };
-
-            addGeoJSON(geojson);
-
+            addLayerToMap({type: "FeatureCollection", features: features}, shpFile.name);
         } 
-        // ✅ الحالة الثانية: GeoJSON
         else if(geojsonFile) {
             const reader = new FileReader();
             reader.onload = function(ev){
                 try {
                     let json = JSON.parse(ev.target.result);
-                    addGeoJSON(json);
+                    addLayerToMap(json, geojsonFile.name);
                 } catch(err){
-                    alert("❌ الملف تالف");
+                    alert("الملف تالف");
                     statusDiv.style.display = "none";
                 }
             };
             reader.readAsText(geojsonFile);
         } 
-        else {
-            alert("يرجى اختيار ملف .shp (يفضل معه .dbf) أو ملف .geojson");
-            statusDiv.style.display = "none";
-        }
     } catch(err){
         console.error(err);
-        alert("حدث خطأ: " + err.message);
+        alert("خطأ: " + err.message);
         statusDiv.style.display = "none";
     }
+    // تصفير الإدخال للسماح برفع نفس الملف مرة أخرى إذا لزم الأمر
+    e.target.value = '';
 });
 </script>
 </body>
