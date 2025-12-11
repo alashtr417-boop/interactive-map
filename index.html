@@ -2,15 +2,13 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>الخارطة التفاعلية</title>
+<title>خريطة تفاعلية متقدمة</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-
 <style>
 body { margin:0; font-family: "Segoe UI", Arial; }
 #map { height:100vh; width:100%; }
 
-/* زر رفع الملفات */
 #uploadBox {
   position: absolute;
   top: 15px;
@@ -20,96 +18,124 @@ body { margin:0; font-family: "Segoe UI", Arial; }
   padding: 10px 14px;
   border-radius: 10px;
   box-shadow: 0 0 8px #0003;
+  font-size: 14px;
 }
 #uploadBox label {
   font-weight: bold;
   color: #0066cc;
   cursor: pointer;
 }
+#uploadBox label:hover {
+  text-decoration: underline;
+}
 </style>
 </head>
-
 <body>
 
 <div id="uploadBox">
-  <label>📁 رفع ملف GeoJSON جديد:
-    <input type="file" id="geoFile" accept=".geojson,.json" style="display:none">
+  <label>📁 رفع ملف GeoJSON / Shapefile / GeoPackage
+    <input type="file" id="fileInput" multiple style="display:none">
   </label>
 </div>
 
 <div id="map"></div>
 
+<!-- مكتبات -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
+<script src="https://unpkg.com/geopackage/dist/geopackage.min.js"></script>
 
 <script>
-
-// إنشاء الخريطة مع Google Satellite
-var googleSat = L.tileLayer(
-  'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
-  { attribution: "Google Satellite" }
-);
-
-var map = L.map('map', {
-    center: [32.5, 44.0],  // العراق
-    zoom: 7,
-    layers: [googleSat]
-});
+// 1️⃣ إنشاء الخريطة مع Google Satellite
+var googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: "Google Satellite" });
+var map = L.map('map', { center: [33.3152,44.3661], zoom: 10, layers: [googleSat] });
 
 var currentLayer = null;
 
-// دالة رسم الطبقة
-function loadGeoJSON(data) {
-    if (currentLayer) {
-        map.removeLayer(currentLayer);
-    }
+// 2️⃣ دالة لإضافة GeoJSON مع الحفاظ على الألوان وارتفاع Z
+function addGeoJSON(data) {
+    if(currentLayer) map.removeLayer(currentLayer);
 
     currentLayer = L.geoJSON(data, {
-        style: {
-            color: "#ff5500",
-            weight: 2,
-            fillOpacity: 0.35
+        style: function(feature) {
+            return {
+                color: feature.properties.color || "#ffcc00",
+                fillColor: feature.properties.fill || feature.properties.color || "#ffcc00",
+                weight: 2,
+                fillOpacity: 0.4
+            }
         },
         onEachFeature: function(feature, layer) {
-
-            let popupHtml = "<h4>معلومات المعلم</h4>";
-            popupHtml += "<table>";
-
+            // عرض خصائص Feature
+            let popup = "<div style='text-align:right'><h4>تفاصيل</h4><table border='1' style='width:100%; border-collapse:collapse'>";
             for (let key in feature.properties) {
-                popupHtml += `
-                    <tr>
-                      <td><b>${key}</b></td>
-                      <td>${feature.properties[key]}</td>
-                    </tr>`;
+                popup += `<tr><td style='padding:4px; background:#f0f0f0'><b>${key}</b></td><td style='padding:4px'>${feature.properties[key]}</td></tr>`;
             }
+            popup += "</table></div>";
+            layer.bindPopup(popup);
 
-            popupHtml += "</table>";
-            layer.bindPopup(popupHtml);
+            // دعم شبه 3D: إذا كان هناك ارتفاع
+            if(feature.properties.height) {
+                layer.setStyle({ fillOpacity: 0.6 });
+            }
         }
     }).addTo(map);
 
     map.fitBounds(currentLayer.getBounds());
 }
 
-// رفع ملف جديد من الجهاز
-document.getElementById("geoFile").addEventListener("change", function(event) {
-    let file = event.target.files[0];
-    let reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            let json = JSON.parse(e.target.result);
-            loadGeoJSON(json);
-        } catch (err) {
-            alert("❌ خطأ: ملف GeoJSON غير صالح");
+// 3️⃣ رفع الملفات من الجهاز
+document.getElementById("fileInput").addEventListener("change", async function(e) {
+    let files = e.target.files;
+
+    let shpFile = Array.from(files).find(f => f.name.endsWith(".shp"));
+    let dbfFile = Array.from(files).find(f => f.name.endsWith(".dbf"));
+    let gpkgFile = Array.from(files).find(f => f.name.endsWith(".gpkg"));
+    let geojsonFile = Array.from(files).find(f => f.name.endsWith(".geojson") || f.name.endsWith(".json"));
+
+    try {
+        if(shpFile && dbfFile){
+            // تحويل Shapefile إلى GeoJSON
+            let geojson = await shapefile.open(shpFile, dbfFile)
+                .then(source => source.read().then(result => result.value));
+            addGeoJSON(geojson);
+
+        } else if(gpkgFile) {
+            // قراءة GeoPackage
+            const arrayBuffer = await gpkgFile.arrayBuffer();
+            const geoPackage = await window.GeoPackage.GeoPackageAPI.open(arrayBuffer);
+            const featureTables = geoPackage.getFeatureTables();
+            if(featureTables.length === 0) return alert("لا توجد طبقات في GPKG");
+            const features = await geoPackage.getGeoJSON(featureTables[0]);
+            addGeoJSON(features);
+
+        } else if(geojsonFile) {
+            // قراءة GeoJSON مباشرة
+            const reader = new FileReader();
+            reader.onload = function(ev){
+                try {
+                    let json = JSON.parse(ev.target.result);
+                    addGeoJSON(json);
+                } catch(err){
+                    alert("❌ الملف ليس GeoJSON صالح");
+                }
+            };
+            reader.readAsText(geojsonFile);
+
+        } else {
+            alert("يرجى رفع ملف GeoJSON، Shapefile (.shp + .dbf)، أو GeoPackage (.gpkg)");
         }
-    };
-    reader.readAsText(file);
+    } catch(err){
+        console.error(err);
+        alert("حدث خطأ أثناء معالجة الملف");
+    }
 });
 
-// تحميل ملف GeoJSON الافتراضي عند فتح الصفحة
-fetch("data.geojson")
-.then(res => res.json())
-.then(json => loadGeoJSON(json))
-.catch(() => console.log("لم يتم العثور على ملف data.geojson"));
+// 4️⃣ تحميل ملف افتراضي عند فتح الصفحة (اختياري)
+fetch("data/test11.geojson")
+.then(res => res.ok ? res.json() : null)
+.then(json => { if(json) addGeoJSON(json); })
+.catch(err => console.log("لم يتم تحميل ملف افتراضي، يمكنك رفع ملف يدوياً."));
 
 </script>
 </body>
