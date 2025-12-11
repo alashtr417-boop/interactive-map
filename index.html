@@ -1,49 +1,116 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>خريطتي التفاعلية</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        body { margin: 0; padding: 0; }
-        #map { height: 100vh; width: 100%; }
-    </style>
+<meta charset="UTF-8">
+<title>الخارطة التفاعلية</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body { margin:0; font-family: "Segoe UI", Arial; }
+#map { height:100vh; width:100%; }
+
+/* زر رفع الملفات */
+#uploadBox {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  z-index: 9999;
+  background: white;
+  padding: 10px 14px;
+  border-radius: 10px;
+  box-shadow: 0 0 8px #0003;
+}
+#uploadBox label {
+  font-weight: bold;
+  color: #0066cc;
+  cursor: pointer;
+}
+</style>
 </head>
+
 <body>
 
-    <div id="map"></div>
+<div id="uploadBox">
+  <label>📁 رفع ملف GeoJSON جديد:
+    <input type="file" id="geoFile" accept=".geojson,.json" style="display:none">
+  </label>
+</div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        // إحداثيات بغداد
-        var map = L.map('map').setView([33.3152, 44.3661], 10);
+<div id="map"></div>
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-        // تحميل ملف البيانات
-        fetch('data/test11.geojson')
-            .then(response => {
-                if (!response.ok) { throw new Error("لم يتم العثور على الملف"); }
-                return response.json();
-            })
-            .then(data => {
-                L.geoJSON(data, {
-                    onEachFeature: function (feature, layer) {
-                        if (feature.properties) {
-                            let popupContent = "<b>تفاصيل:</b><br>";
-                            for (let key in feature.properties) {
-                                popupContent += `${key}: ${feature.properties[key]}<br>`;
-                            }
-                            layer.bindPopup(popupContent);
-                        }
-                    }
-                }).addTo(map);
-            })
-            .catch(error => console.log("جاري البحث عن البيانات... تأكد من مسار الملف"));
-    </script>
+<script>
+
+// إنشاء الخريطة مع Google Satellite
+var googleSat = L.tileLayer(
+  'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
+  { attribution: "Google Satellite" }
+);
+
+var map = L.map('map', {
+    center: [32.5, 44.0],  // العراق
+    zoom: 7,
+    layers: [googleSat]
+});
+
+var currentLayer = null;
+
+// دالة رسم الطبقة
+function loadGeoJSON(data) {
+    if (currentLayer) {
+        map.removeLayer(currentLayer);
+    }
+
+    currentLayer = L.geoJSON(data, {
+        style: {
+            color: "#ff5500",
+            weight: 2,
+            fillOpacity: 0.35
+        },
+        onEachFeature: function(feature, layer) {
+
+            let popupHtml = "<h4>معلومات المعلم</h4>";
+            popupHtml += "<table>";
+
+            for (let key in feature.properties) {
+                popupHtml += `
+                    <tr>
+                      <td><b>${key}</b></td>
+                      <td>${feature.properties[key]}</td>
+                    </tr>`;
+            }
+
+            popupHtml += "</table>";
+            layer.bindPopup(popupHtml);
+        }
+    }).addTo(map);
+
+    map.fitBounds(currentLayer.getBounds());
+}
+
+// رفع ملف جديد من الجهاز
+document.getElementById("geoFile").addEventListener("change", function(event) {
+    let file = event.target.files[0];
+    let reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            let json = JSON.parse(e.target.result);
+            loadGeoJSON(json);
+        } catch (err) {
+            alert("❌ خطأ: ملف GeoJSON غير صالح");
+        }
+    };
+    reader.readAsText(file);
+});
+
+// تحميل ملف GeoJSON الافتراضي عند فتح الصفحة
+fetch("data.geojson")
+.then(res => res.json())
+.then(json => loadGeoJSON(json))
+.catch(() => console.log("لم يتم العثور على ملف data.geojson"));
+
+</script>
 </body>
 </html>
