@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>خريطة تفاعلية متقدمة</title>
+<title>خريطة تفاعلية - قارئ Shapefile المصحح</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
@@ -28,115 +28,139 @@ body { margin:0; font-family: "Segoe UI", Arial; }
 #uploadBox label:hover {
   text-decoration: underline;
 }
+#status {
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+    display: none;
+}
 </style>
 </head>
 <body>
 
 <div id="uploadBox">
-  <label>📁 رفع ملف GeoJSON / Shapefile / GeoPackage
+  <label>📁 رفع ملف (Shapefile يجب رفع .shp و .dbf معاً)
     <input type="file" id="fileInput" multiple style="display:none">
   </label>
+  <div id="status">جاري المعالجة...</div>
 </div>
 
 <div id="map"></div>
 
-<!-- مكتبات -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
-<script src="https://unpkg.com/geopackage/dist/geopackage.min.js"></script>
+<script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script> 
 
 <script>
-// 1️⃣ إنشاء الخريطة مع Google Satellite
+// 1️⃣ إعداد الخريطة
 var googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: "Google Satellite" });
-var map = L.map('map', { center: [33.3152,44.3661], zoom: 10, layers: [googleSat] });
+var map = L.map('map', { center: [33.3152,44.3661], zoom: 6, layers: [googleSat] });
 
 var currentLayer = null;
 
-// 2️⃣ دالة لإضافة GeoJSON مع الحفاظ على الألوان وارتفاع Z
+// 2️⃣ دالة رسم GeoJSON
 function addGeoJSON(data) {
     if(currentLayer) map.removeLayer(currentLayer);
 
     currentLayer = L.geoJSON(data, {
         style: function(feature) {
             return {
-                color: feature.properties.color || "#ffcc00",
-                fillColor: feature.properties.fill || feature.properties.color || "#ffcc00",
+                color: feature.properties.color || "#ff5500",
+                fillColor: feature.properties.fill || "#ff5500",
                 weight: 2,
                 fillOpacity: 0.4
             }
         },
         onEachFeature: function(feature, layer) {
-            // عرض خصائص Feature
-            let popup = "<div style='text-align:right'><h4>تفاصيل</h4><table border='1' style='width:100%; border-collapse:collapse'>";
+            let popup = "<div style='text-align:right; max-height:200px; overflow-y:auto'><h4>تفاصيل</h4><table border='1' style='width:100%; border-collapse:collapse'>";
             for (let key in feature.properties) {
                 popup += `<tr><td style='padding:4px; background:#f0f0f0'><b>${key}</b></td><td style='padding:4px'>${feature.properties[key]}</td></tr>`;
             }
             popup += "</table></div>";
             layer.bindPopup(popup);
-
-            // دعم شبه 3D: إذا كان هناك ارتفاع
-            if(feature.properties.height) {
-                layer.setStyle({ fillOpacity: 0.6 });
-            }
         }
     }).addTo(map);
 
-    map.fitBounds(currentLayer.getBounds());
+    try {
+        map.fitBounds(currentLayer.getBounds());
+    } catch(e) { console.log("لا توجد حدود للطبقة"); }
+    
+    document.getElementById("status").style.display = "none";
 }
 
-// 3️⃣ رفع الملفات من الجهاز
+// 3️⃣ دالة مساعدة لتحويل الملف إلى ArrayBuffer (ضروري لملفات Shapefile)
+function readFileAsArrayBuffer(file) {
+    return new Promise((resolve, reject) => {
+        let reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+// 4️⃣ معالجة الملفات المرفوعة
 document.getElementById("fileInput").addEventListener("change", async function(e) {
     let files = e.target.files;
+    let statusDiv = document.getElementById("status");
+    statusDiv.style.display = "block";
+    statusDiv.innerText = "جاري قراءة الملفات...";
 
-    let shpFile = Array.from(files).find(f => f.name.endsWith(".shp"));
-    let dbfFile = Array.from(files).find(f => f.name.endsWith(".dbf"));
-    let gpkgFile = Array.from(files).find(f => f.name.endsWith(".gpkg"));
-    let geojsonFile = Array.from(files).find(f => f.name.endsWith(".geojson") || f.name.endsWith(".json"));
+    // تصنيف الملفات
+    let shpFile = Array.from(files).find(f => f.name.toLowerCase().endsWith(".shp"));
+    let dbfFile = Array.from(files).find(f => f.name.toLowerCase().endsWith(".dbf"));
+    let geojsonFile = Array.from(files).find(f => f.name.toLowerCase().endsWith(".geojson") || f.name.toLowerCase().endsWith(".json"));
 
     try {
-        if(shpFile && dbfFile){
-            // تحويل Shapefile إلى GeoJSON
-            let geojson = await shapefile.open(shpFile, dbfFile)
-                .then(source => source.read().then(result => result.value));
+        // ✅ الحالة الأولى: Shapefile (SHP + DBF)
+        if(shpFile) {
+            statusDiv.innerText = "جاري تحويل Shapefile...";
+            
+            // قراءة الملفات كـ ArrayBuffer
+            const shpBuffer = await readFileAsArrayBuffer(shpFile);
+            const dbfBuffer = dbfFile ? await readFileAsArrayBuffer(dbfFile) : undefined;
+
+            // فتح الملف باستخدام المكتبة
+            const source = await shapefile.open(shpBuffer, dbfBuffer);
+            
+            // تجميع كل العناصر (Loop) - هذا هو الجزء الذي كان ينقصك
+            let features = [];
+            let result;
+            while (!(result = await source.read()).done) {
+                features.push(result.value);
+            }
+
+            // تكوين كائن GeoJSON كامل
+            const geojson = {
+                type: "FeatureCollection",
+                features: features
+            };
+
             addGeoJSON(geojson);
 
-        } else if(gpkgFile) {
-            // قراءة GeoPackage
-            const arrayBuffer = await gpkgFile.arrayBuffer();
-            const geoPackage = await window.GeoPackage.GeoPackageAPI.open(arrayBuffer);
-            const featureTables = geoPackage.getFeatureTables();
-            if(featureTables.length === 0) return alert("لا توجد طبقات في GPKG");
-            const features = await geoPackage.getGeoJSON(featureTables[0]);
-            addGeoJSON(features);
-
-        } else if(geojsonFile) {
-            // قراءة GeoJSON مباشرة
+        } 
+        // ✅ الحالة الثانية: GeoJSON
+        else if(geojsonFile) {
             const reader = new FileReader();
             reader.onload = function(ev){
                 try {
                     let json = JSON.parse(ev.target.result);
                     addGeoJSON(json);
                 } catch(err){
-                    alert("❌ الملف ليس GeoJSON صالح");
+                    alert("❌ الملف تالف");
+                    statusDiv.style.display = "none";
                 }
             };
             reader.readAsText(geojsonFile);
-
-        } else {
-            alert("يرجى رفع ملف GeoJSON، Shapefile (.shp + .dbf)، أو GeoPackage (.gpkg)");
+        } 
+        else {
+            alert("يرجى اختيار ملف .shp (يفضل معه .dbf) أو ملف .geojson");
+            statusDiv.style.display = "none";
         }
     } catch(err){
         console.error(err);
-        alert("حدث خطأ أثناء معالجة الملف");
+        alert("حدث خطأ: " + err.message);
+        statusDiv.style.display = "none";
     }
 });
-
-// 4️⃣ تحميل ملف افتراضي عند فتح الصفحة (اختياري)
-fetch("data/test11.geojson")
-.then(res => res.ok ? res.json() : null)
-.then(json => { if(json) addGeoJSON(json); })
-.catch(err => console.log("لم يتم تحميل ملف افتراضي، يمكنك رفع ملف يدوياً."));
-
 </script>
 </body>
 </html>
